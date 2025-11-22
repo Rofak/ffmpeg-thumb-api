@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { writeFileSync, unlinkSync, readFileSync } from 'fs';
 import { spawn } from 'child_process';
+import { Readable } from 'stream';
 
 @Injectable()
 export class ThumbnailService {
@@ -128,13 +129,14 @@ export class ThumbnailService {
       new Promise<void>((resolve, reject) => {
         const ffmpeg = spawn('ffmpeg', [
           '-ss',
-          time,
+          `00:00:${time}`,
           '-i',
           tempVideo,
           '-frames:v',
           '1',
-          '-q:v',
-          '2',
+          '-an',
+          '-r',
+          '0.05',
           outputPath,
         ]);
 
