@@ -3,6 +3,12 @@ import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  await app.listen(3001);
+  app.enableCors({
+    origin: ['https://similartoolz.com', 'http://localhost:3000'],
+    methods: 'GET',
+    allowedHeaders: 'Content-Type, Authorization',
+    credentials: true,
+  });
+  await app.listen(3002);
 }
 bootstrap();
