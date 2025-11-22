@@ -10,6 +10,8 @@ import {
 import * as path from 'path';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
+import { writeFileSync, unlinkSync, readFileSync } from 'fs';
+import { spawn } from 'child_process';
 
 @Injectable()
 export class ThumbnailService {
@@ -110,5 +112,77 @@ export class ThumbnailService {
     }
 
     return { removed: deleted };
+  }
+
+  async thumbFromBufferToS3(buffer: any, userId: string) {
+    const tempVideo = path.join(process.cwd(), 'tmp', `${randomUUID()}.mp4`);
+    writeFileSync(tempVideo, buffer);
+
+    const timestamps = ['0', '1', '2'];
+
+    // FFmpeg runner
+    const runFFmpeg = (time: string, outputPath: string) =>
+      new Promise<void>((resolve, reject) => {
+        const ffmpeg = spawn('ffmpeg', [
+          '-ss',
+          time,
+          '-i',
+          tempVideo,
+          '-frames:v',
+          '1',
+          '-q:v',
+          '2',
+          outputPath,
+        ]);
+
+        ffmpeg.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`FFmpeg exited with code ${code}`));
+        });
+      });
+
+    const successfulThumbs: string[] = [];
+
+    // Generate thumbnails sequentially
+    for (const time of timestamps) {
+      const thumbPath = path.join(
+        process.cwd(),
+        'tmp',
+        `thumb_${randomUUID()}.jpg`,
+      );
+      try {
+        await runFFmpeg(time, thumbPath);
+        successfulThumbs.push(thumbPath);
+      } catch (err) {
+        console.warn(`Thumbnail generation failed at ${time}s:`, err);
+        if (fs.existsSync(thumbPath)) unlinkSync(thumbPath); // clean partial file
+      }
+    }
+
+    // Upload to S3 sequentially (or in parallel, up to you)
+    const uploadedThumbs: { uri: string }[] = [];
+    for (const thumbPath of successfulThumbs) {
+      try {
+        const key = `thumbnails/${userId}/${randomUUID()}.jpg`;
+        await this.s3Client.send(
+          new PutObjectCommand({
+            Bucket: this.bucketName,
+            Key: key,
+            Body: readFileSync(thumbPath),
+            ContentType: 'image/jpeg',
+          }) as any,
+        );
+        uploadedThumbs.push({ uri: `${this.baseUrl}/${key}` });
+      } catch (err) {
+        console.warn(`S3 upload failed for ${thumbPath}:`, err);
+      } finally {
+        if (fs.existsSync(thumbPath)) unlinkSync(thumbPath); // cleanup
+      }
+    }
+
+    // Cleanup video file
+    if (fs.existsSync(tempVideo)) unlinkSync(tempVideo);
+
+    return uploadedThumbs; // only successfully uploaded thumbnails
   }
 }

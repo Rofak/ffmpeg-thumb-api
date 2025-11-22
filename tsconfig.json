@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "types": ["node", "jest"],
+    "types": ["node", "jest","Multer"],
     "module": "commonjs",
     "declaration": true,
     "removeComments": true,

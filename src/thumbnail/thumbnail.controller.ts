@@ -5,8 +5,12 @@ import {
   BadRequestException,
   Param,
   Delete,
+  Post,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ThumbnailService } from './thumbnail.service';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 @Controller('thumbnail')
 export class ThumbnailController {
@@ -23,5 +27,14 @@ export class ThumbnailController {
   @Delete('/cleanup')
   async cleanupOldThumbs() {
     return this.thumbnailService.clearOldThumbnails();
+  }
+
+  @Post('/upload/:userId')
+  @UseInterceptors(FileInterceptor('file'))
+  async generate(
+    @Param('userId') userId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.thumbnailService.thumbFromBufferToS3(file.buffer, userId);
   }
 }
