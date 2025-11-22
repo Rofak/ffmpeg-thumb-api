@@ -8,7 +8,7 @@ export class ScheduleTaskService {
 
   constructor(private thumbnailService: ThumbnailService) {}
 
-  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  @Cron(CronExpression.EVERY_2_HOURS)
   async handleCron() {
     this.logger.debug('start clear old thumbnail');
     const res = await this.thumbnailService.clearOldThumbnails();
