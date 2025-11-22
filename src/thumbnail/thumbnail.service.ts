@@ -115,6 +115,9 @@ export class ThumbnailService {
   }
 
   async thumbFromBufferToS3(buffer: any, userId: string) {
+    const tmpDir = path.join(process.cwd(), 'tmp');
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
+
     const tempVideo = path.join(process.cwd(), 'tmp', `${randomUUID()}.mp4`);
     writeFileSync(tempVideo, buffer);
 
