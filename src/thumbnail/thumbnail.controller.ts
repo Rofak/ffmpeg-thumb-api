@@ -31,10 +31,7 @@ export class ThumbnailController {
 
   @Post('/upload/:userId')
   @UseInterceptors(FileInterceptor('file'))
-  async generate(
-    @Param('userId') userId: string,
-    @UploadedFile() file: Express.Multer.File,
-  ) {
+  async generate(@Param('userId') userId: string, @UploadedFile() file: any) {
     return this.thumbnailService.thumbFromBufferToS3(file.buffer, userId);
   }
 }
