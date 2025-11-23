@@ -34,4 +34,9 @@ export class ThumbnailController {
   async generate(@Param('userId') userId: string, @UploadedFile() file: any) {
     return this.thumbnailService.thumbFromBufferToS3(file.buffer, userId);
   }
+
+  @Delete('/:userId')
+  async deleteThumb(@Param('userId') userId: string) {
+    return this.thumbnailService.deleteThumb(userId);
+  }
 }

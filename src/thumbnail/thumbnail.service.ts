@@ -6,13 +6,13 @@ import {
   PutObjectCommand,
   DeleteObjectCommand,
   ListObjectsV2Command,
+  DeleteObjectsCommand,
 } from '@aws-sdk/client-s3';
 import * as path from 'path';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { writeFileSync, unlinkSync, readFileSync } from 'fs';
 import { spawn } from 'child_process';
-import { Readable } from 'stream';
 
 @Injectable()
 export class ThumbnailService {
@@ -189,5 +189,33 @@ export class ThumbnailService {
     if (fs.existsSync(tempVideo)) unlinkSync(tempVideo);
 
     return uploadedThumbs; // only successfully uploaded thumbnails
+  }
+
+  async deleteThumb(userId: string) {
+    const prefix = `thumbnails/${userId}/`;
+    const listed: any = await this.s3Client.send(
+      new ListObjectsV2Command({
+        Bucket: this.bucketName,
+        Prefix: prefix,
+      }) as any,
+    );
+
+    if (!listed.Contents || listed.Contents.length === 0) {
+      return {
+        totalDeleted: 0,
+      };
+    }
+
+    const objects = listed.Contents.map((obj) => ({ Key: obj.Key }));
+
+    const response: any = await this.s3Client.send(
+      new DeleteObjectsCommand({
+        Bucket: this.bucketName,
+        Delete: { Objects: objects },
+      }) as any,
+    );
+    return {
+      totalDeleted: response.Deleted.length,
+    };
   }
 }
