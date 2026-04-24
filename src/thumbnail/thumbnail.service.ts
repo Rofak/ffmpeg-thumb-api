@@ -23,7 +23,7 @@ export class ThumbnailService {
     this.bucketName = this.configService.get<string>('CONTABO_BUCKET_NAME');
     this.baseUrl = this.configService.get<string>('CONTABO_BASE_URL');
     this.s3Client = new S3Client({
-      region: 'sin1',
+      region: 'auto',
       endpoint: configService.get<string>('CONTABO_ENDPOIN'),
       credentials: {
         accessKeyId: configService.get<string>('CONTABO_ACCESS_KEY'),
