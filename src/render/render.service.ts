@@ -11,7 +11,13 @@ import {
 import * as path from 'path';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
-import { writeFileSync, unlinkSync, readFileSync, createWriteStream } from 'fs';
+import {
+  writeFileSync,
+  unlinkSync,
+  createWriteStream,
+  createReadStream,
+  statSync,
+} from 'fs';
 
 @Injectable()
 export class RenderService {
@@ -126,7 +132,8 @@ export class RenderService {
       new PutObjectCommand({
         Bucket: this.bucketName,
         Key: key,
-        Body: readFileSync(filePath),
+        Body: createReadStream(filePath),
+        ContentLength: statSync(filePath).size,
         ContentType: contentType,
         ACL: 'public-read',
       }) as any,
@@ -314,37 +321,24 @@ export class RenderService {
       }
 
       filterParts.push(
-        `${mixLabels.join('')}amix=inputs=${mixLabels.length}:duration=longest:dropout_transition=0:normalize=0,volume=2[aoutpre]`,
+        `${mixLabels.join('')}amix=inputs=${mixLabels.length}:duration=longest:dropout_transition=0:normalize=0,volume=2[aout]`,
       );
-      filterParts.push('[aoutpre]asplit=2[aout_v][aout_a]');
 
       onProgress?.(10);
 
-      const args = ['-y', '-i', videoPath];
+      // Mixing and remuxing are done as two separate ffmpeg invocations
+      // (rather than one command fanning the mix out to two output files via
+      // asplit) because some ffmpeg builds hang indefinitely finalizing two
+      // simultaneous output muxers fed from a shared filtergraph.
+      const mixArgs = ['-y', '-i', videoPath];
       for (const inputPath of inputs) {
-        args.push('-i', inputPath);
+        mixArgs.push('-i', inputPath);
       }
-      args.push(
+      mixArgs.push(
         '-filter_complex',
         filterParts.join(';'),
         '-map',
-        '0:v',
-        '-map',
-        '[aout_v]',
-        '-c:v',
-        'copy',
-        '-c:a',
-        'aac',
-        '-b:a',
-        '192k',
-        '-ar',
-        '44100',
-        '-ac',
-        '2',
-        '-shortest',
-        outputVideoPath,
-        '-map',
-        '[aout_a]',
+        '[aout]',
         '-c:a',
         'aac',
         '-b:a',
@@ -359,9 +353,29 @@ export class RenderService {
       );
 
       await this.runFFmpeg(
-        args,
-        onProgress &&
-          ((percent) => onProgress(10 + Math.round(percent * 0.85))),
+        mixArgs,
+        onProgress && ((percent) => onProgress(10 + Math.round(percent * 0.6))),
+      );
+
+      await this.runFFmpeg(
+        [
+          '-y',
+          '-i',
+          videoPath,
+          '-i',
+          outputAudioPath,
+          '-map',
+          '0:v',
+          '-map',
+          '1:a',
+          '-c:v',
+          'copy',
+          '-c:a',
+          'copy',
+          '-shortest',
+          outputVideoPath,
+        ],
+        onProgress && (() => onProgress(70)),
       );
 
       const [videoResult, audioResult] = await Promise.all([

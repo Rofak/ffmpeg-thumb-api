@@ -19,7 +19,10 @@ export type RenderJobData =
       bitrateKbps?: number;
     };
 
-@Processor('render', { concurrency: getRenderConcurrency() })
+@Processor('render', {
+  concurrency: getRenderConcurrency(),
+  lockDuration: 10 * 60 * 1000,
+})
 export class RenderProcessor extends WorkerHost {
   constructor(private readonly renderService: RenderService) {
     super();
