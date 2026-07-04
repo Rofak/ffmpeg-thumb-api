@@ -1,0 +1,66 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+A small NestJS API that generates video thumbnails using `ffmpeg` and uploads them to Contabo Object Storage (S3-compatible). Runs on port 3001. It also has a `RenderModule` that merges video+audio via `ffmpeg` and queues the work through BullMQ/Redis.
+
+## Commands
+
+```bash
+yarn start:dev      # run with hot reload
+yarn build           # compile to dist/ (nest build)
+yarn start:prod       # run compiled dist/main.js
+yarn lint             # eslint --fix over src/apps/libs/test
+yarn format            # prettier --write src/ and test/
+yarn test              # jest unit tests (rootDir: src, matches *.spec.ts)
+yarn test:e2e            # jest using test/jest-e2e.json
+yarn test:cov              # jest with coverage
+```
+
+There are currently no `*.spec.ts` files under `src/`, so `yarn test` has nothing to run — the jest config is preconfigured for when tests are added. `test/app.e2e-spec.ts` is the only existing test.
+
+`ffmpeg` must be installed and on `PATH` — the service shells out to the `ffmpeg` binary directly (`child_process.exec`/`spawn`), there is no bundled binary.
+
+A local Redis instance must be reachable (`REDIS_HOST`/`REDIS_PORT`) for `RenderModule` to boot — BullMQ connects to it eagerly via `BullModule.forRootAsync`, so the app won't start without Redis available.
+
+## Architecture
+
+- `AppModule` wires together `ThumbnailModule`, `RenderModule`, `ScheduleTaskModule`, `ConfigModule` (reads `.env` via `@nestjs/config`), and `ScheduleModule` (nestjs cron support, currently unused — see below).
+- `ThumbnailController` (`src/thumbnail/thumbnail.controller.ts`) exposes:
+  - `GET /thumbnail/:userId?url=<videoUrl>` — pulls 3 frames (at t=0,1,2s) from a remote video URL via `ffmpeg -ss ... -i <url>`, uploads each to S3, returns their public URIs.
+  - `POST /thumbnail/upload/:userId` (multipart `file` field) — writes the uploaded buffer to a temp `.mp4`, extracts 3 frames via `ffmpeg`, uploads to S3, cleans up temp files.
+  - `DELETE /thumbnail/cleanup` — sweeps the whole `thumbnails/` prefix in the bucket and deletes any object older than 1 hour (hardcoded in `clearOldThumbnails`).
+  - `DELETE /thumbnail/:userId` — deletes all objects under `thumbnails/<userId>/`.
+- `ThumbnailService` (`src/thumbnail/thumbnail.service.ts`) does all the ffmpeg + S3 work. It always writes intermediate frames to the local `tmp/` directory (created on demand) before uploading, then deletes the local file — `tmp/` should stay empty between requests but check it if disk usage grows.
+- S3 objects are keyed as `thumbnails/<userId>/<uuid>.jpg`, uploaded with `ACL: public-read`, and returned to callers as `${CONTABO_BASE_URL}/<key>`.
+- `ScheduleTaskService` (`src/schedule-task/schedule-task.service.ts`) is meant to run `ThumbnailService.clearOldThumbnails()` on a cron schedule via `@nestjs/schedule`, but the `@Cron` handler is currently commented out — cleanup is only triggered manually via the `DELETE /thumbnail/cleanup` endpoint.
+- `RenderModule` merges a video + audio track into one `.mp4` via `ffmpeg -c:v copy -c:a aac` (video stream is never re-encoded) and uploads the result to the `_V2` Contabo bucket. Work is queued through BullMQ instead of running inline on the request:
+  - `POST /render/url/:userId` (`{ videoUrl, audioUrl }` body) and `POST /render/:userId` (multipart `video`/`audio` fields) both enqueue a job on the `render` queue and return `{ jobId }` immediately — they do not wait for the render to finish.
+  - For the URL flow, `RenderService.renderFromUrls` downloads both inputs to `tmp/` **in parallel via axios** before invoking ffmpeg — ffmpeg never receives a remote URL directly (that would serialize/slow the fetch inside the ffmpeg process itself).
+  - `GET /render/status/:jobId` returns `{ jobId, state, progress, result, failedReason }`. `state` is a BullMQ job state (`waiting`/`active`/`completed`/`failed`/...). `progress` is 0-100, derived from real ffmpeg `time=`/`Duration` parsing in `RenderService.runFFmpeg` (mapped into the 10-95 range) plus coarse markers for download (5) and upload-complete (100) — see `render.service.ts`. `result` is the `{ uri }` payload once `state` is `completed`.
+  - `GET /render/concurrency` reports capacity and live load: `{ cpuCount, renderConcurrencyEnv, effectiveConcurrency, active, waiting, delayed, remainingConcurrency }`, using `renderQueue.getJobCounts()`.
+  - `DELETE /render/:userId` still runs synchronously (it's just an S3 list+delete, no ffmpeg work).
+  - `RenderProcessor` (`src/render/render.processor.ts`) is the BullMQ worker that actually calls `RenderService`; its concurrency comes from `src/render/render-concurrency.ts` (`RENDER_CONCURRENCY` env var, else `os.cpus().length`) — this is the main throughput knob for making renders "faster" under load, since ffmpeg itself already avoids re-encoding video. The processor also forwards a `job.updateProgress` callback into `RenderService` so status polling reflects live progress.
+  - For the upload flow, `RenderController` writes the multipart buffers to `tmp/` synchronously via `RenderService.persistUploadedFiles` before enqueueing (job payloads go through Redis as JSON, so raw buffers can't be queued directly) — the worker consumes those paths and deletes them when done.
+  - `POST /render/dub/:userId` (`{ originVideoUrl, segments: [{ audio (base64), start, end }] }`) queues a dubbing render via `RenderService.renderDubbedVideo`: each segment's base64 audio is decoded to `tmp/` synchronously in the controller (`persistDubSegments`), then the worker downloads `originVideoUrl`, probes each segment's real duration with `ffprobe` (`getDuration`), time-stretches it to fit its `end - start` window via a chained `atempo` filter (`buildAtempoChain` — `atempo` only accepts 0.5-2.0 per instance, so tempos outside that range are split across multiple chained filters), positions it with `adelay`, and mixes all segments over a silence bed (`anullsrc`+`apad`) with `amix`. The mixed audio is fanned out via `asplit` into two ffmpeg outputs in a single pass: the dubbed video (`-c:v copy`, `-shortest`) and the standalone dubbed audio track (bounded to the video's duration via `-t`, since the silence bed pads indefinitely and would otherwise make an unbounded output). Returns `{ videoUri, audioUri }` (both uploaded to the `_V2` bucket) as the job's `result`.
+  - CORS in `src/main.ts` only allows `GET, DELETE`, so like the thumbnail upload endpoint, all three `POST /render/...` endpoints are not reachable cross-origin from a browser under the current config; only the `GET /render/...` endpoints are.
+  - Swagger docs are served at `GET /docs` (`src/main.ts`), covering both `ThumbnailController` and `RenderController`.
+
+## Configuration
+
+Env vars (loaded via `ConfigModule.forRoot()` from `.env`):
+- `CONTABO_ACCESS_KEY`, `CONTABO_SECRET_KEY`
+- `CONTABO_ENDPOIN` — note the missing trailing "T", this is the actual key name used in `thumbnail.service.ts`, not a typo to "fix" in isolation.
+- `CONTABO_BASE_URL` — prefix used to build public thumbnail URLs
+- `CONTABO_BUCKET_NAME`
+- `CONTABO_ACCESS_KEY_V2`, `CONTABO_SECRET_KEY_V2`, `CONTABO_ENDPOIN_V2`, `CONTABO_BASE_URL_V2`, `CONTABO_BUCKET_NAME_V2` — used by `RenderService` for the render output bucket (separate from the thumbnail bucket above)
+- `REDIS_HOST` (default `localhost`), `REDIS_PORT` (default `6379`), `REDIS_PASSWORD` (optional) — BullMQ connection for the `render` queue
+- `RENDER_CONCURRENCY` — number of renders `RenderProcessor` will run in parallel; defaults to `os.cpus().length` if unset
+
+CORS (`src/main.ts`) only allows `https://similartoolz.net` and `http://localhost:3000`, and only `GET, DELETE` methods — the `POST /thumbnail/upload/:userId` endpoint is therefore not reachable cross-origin from a browser under the current CORS config.
+
+## Deployment
+
+`ecosystem.config.js` runs the built app under PM2 as `thumbnail-api` in cluster mode against `dist/main.js`. CI (`.github/workflows/ci.yml`) only runs `yarn install && yarn build` on PRs targeting `master`; there is no test or deploy step in CI.
