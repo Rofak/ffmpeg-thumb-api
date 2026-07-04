@@ -382,6 +382,55 @@ export class RenderService {
     }
   }
 
+  async extractAudioFromUrl(
+    userId: string,
+    videoUrl: string,
+    bitrateKbps = 128,
+    onProgress?: (percent: number) => void,
+  ) {
+    const tmpDir = path.join(process.cwd(), 'tmp');
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
+
+    const videoPath = path.join(tmpDir, `video_${randomUUID()}.mp4`);
+    const outputPath = path.join(tmpDir, `audio_${randomUUID()}.mp3`);
+
+    try {
+      await this.downloadToFile(videoUrl, videoPath);
+      onProgress?.(10);
+
+      await this.runFFmpeg(
+        [
+          '-y',
+          '-i',
+          videoPath,
+          '-vn',
+          '-c:a',
+          'libmp3lame',
+          '-b:a',
+          `${bitrateKbps}k`,
+          '-ar',
+          '44100',
+          '-ac',
+          '2',
+          outputPath,
+        ],
+        onProgress &&
+          ((percent) => onProgress(10 + Math.round(percent * 0.85))),
+      );
+
+      const result = await this.uploadFileToS3(
+        outputPath,
+        `renders/${userId}/${randomUUID()}.mp3`,
+        'audio/mpeg',
+      );
+      onProgress?.(100);
+      return result;
+    } finally {
+      if (fs.existsSync(videoPath)) unlinkSync(videoPath);
+      if (fs.existsSync(outputPath)) unlinkSync(outputPath);
+    }
+  }
+
   async deleteRender(userId: string) {
     const prefix = `renders/${userId}/`;
     const listed: any = await this.s3Client.send(

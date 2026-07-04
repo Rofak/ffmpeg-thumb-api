@@ -11,6 +11,12 @@ export type RenderJobData =
       userId: string;
       videoUrl: string;
       segments: { audioPath: string; start: number; end: number }[];
+    }
+  | {
+      type: 'extract-audio';
+      userId: string;
+      videoUrl: string;
+      bitrateKbps?: number;
     };
 
 @Processor('render', { concurrency: getRenderConcurrency() })
@@ -38,6 +44,14 @@ export class RenderProcessor extends WorkerHost {
         data.userId,
         data.videoUrl,
         data.segments,
+        onProgress,
+      );
+    }
+    if (data.type === 'extract-audio') {
+      return this.renderService.extractAudioFromUrl(
+        data.userId,
+        data.videoUrl,
+        data.bitrateKbps,
         onProgress,
       );
     }

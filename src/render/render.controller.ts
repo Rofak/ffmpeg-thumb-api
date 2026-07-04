@@ -25,6 +25,7 @@ import { RenderService } from './render.service';
 import { RenderJobData } from './render.processor';
 import { RenderUrlDto } from './dto/render-url.dto';
 import { DubVideoDto } from './dto/dub-video.dto';
+import { ExtractAudioDto } from './dto/extract-audio.dto';
 import { getCpuCount, getRenderConcurrency } from './render-concurrency';
 import { randomUUID as uuidv4 } from 'crypto';
 
@@ -136,6 +137,35 @@ export class RenderController {
         userId,
         videoUrl: dto.originVideoUrl,
         segments,
+      },
+      { jobId },
+    );
+    return { jobId };
+  }
+
+  @Post('/audio/:userId')
+  @ApiOperation({
+    summary:
+      'Queue a job that extracts the audio track from a video and compresses it to MP3',
+  })
+  @ApiParam({ name: 'userId', description: 'Owner of the extracted audio' })
+  @ApiBody({ type: ExtractAudioDto })
+  @ApiResponse({ status: 201, schema: { example: { jobId: 'uuid' } } })
+  async extractAudio(
+    @Param('userId') userId: string,
+    @Body() dto: ExtractAudioDto,
+  ) {
+    if (!dto?.videoUrl) {
+      throw new BadRequestException('videoUrl is required');
+    }
+    const jobId = uuidv4();
+    await this.renderQueue.add(
+      'render',
+      {
+        type: 'extract-audio',
+        userId,
+        videoUrl: dto.videoUrl,
+        bitrateKbps: dto.bitrateKbps,
       },
       { jobId },
     );
