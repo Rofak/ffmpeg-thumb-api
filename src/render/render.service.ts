@@ -127,6 +127,7 @@ export class RenderService {
     filePath: string,
     key: string,
     contentType: string,
+    disposition: 'attachment' | 'inline' = 'attachment',
   ) {
     await this.s3Client.send(
       new PutObjectCommand({
@@ -135,6 +136,7 @@ export class RenderService {
         Body: createReadStream(filePath),
         ContentLength: statSync(filePath).size,
         ContentType: contentType,
+        ContentDisposition: `${disposition}; filename="${path.basename(key)}"`,
         ACL: 'public-read',
       }) as any,
     );
@@ -276,10 +278,12 @@ export class RenderService {
     const videoPath = path.join(tmpDir, `video_${randomUUID()}.mp4`);
     const outputVideoPath = path.join(tmpDir, `dub_video_${randomUUID()}.mp4`);
     const outputAudioPath = path.join(tmpDir, `dub_audio_${randomUUID()}.m4a`);
+    const thumbnailPath = path.join(tmpDir, `dub_thumb_${randomUUID()}.jpg`);
     const cleanupPaths = [
       videoPath,
       outputVideoPath,
       outputAudioPath,
+      thumbnailPath,
       ...segments.map((s) => s.audioPath),
     ];
 
@@ -378,17 +382,39 @@ export class RenderService {
         onProgress && (() => onProgress(70)),
       );
 
-      const [videoResult, audioResult] = await Promise.all([
+      await this.runFFmpeg([
+        '-y',
+        '-i',
+        outputVideoPath,
+        '-frames:v',
+        '1',
+        '-q:v',
+        '2',
+        thumbnailPath,
+      ]);
+      onProgress?.(85);
+
+      const [videoResult, audioResult, thumbnailResult] = await Promise.all([
         this.uploadToS3(outputVideoPath, userId),
         this.uploadFileToS3(
           outputAudioPath,
           `renders/${userId}/${randomUUID()}.m4a`,
           'audio/mp4',
         ),
+        this.uploadFileToS3(
+          thumbnailPath,
+          `renders/${userId}/${randomUUID()}.jpg`,
+          'image/jpeg',
+          'inline',
+        ),
       ]);
       onProgress?.(100);
 
-      return { videoUri: videoResult.uri, audioUri: audioResult.uri };
+      return {
+        videoUri: videoResult.uri,
+        audioUri: audioResult.uri,
+        thumbnailUri: thumbnailResult.uri,
+      };
     } finally {
       for (const p of cleanupPaths) {
         if (fs.existsSync(p)) unlinkSync(p);
