@@ -31,10 +31,7 @@ RUN yarn install --frozen-lockfile --production && yarn cache clean
 
 COPY --from=build /app/dist ./dist
 
-RUN mkdir -p tmp \
-    && useradd --create-home --uid 1001 nodeapp \
-    && chown -R nodeapp:nodeapp /app
-USER nodeapp
+RUN mkdir -p tmp
 
 EXPOSE 3002
 CMD ["node", "dist/main.js"]
