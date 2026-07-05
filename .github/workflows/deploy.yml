@@ -1,0 +1,69 @@
+name: Deploy ffmpegAPI
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build
+        run: yarn build
+
+  deploy:
+    needs: build-check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          password: ${{ secrets.PASSWORD }}
+          port: ${{ secrets.PORT }}
+          script: |
+            set -e
+            cd /var/www/ffmpeg-api/ffmpeg-thumb-api
+
+            if [ ! -f .env ]; then
+              echo "ERROR: .env not found on server - refusing to deploy without it"
+              exit 1
+            fi
+
+            echo "Pulling latest code..."
+            git pull origin master
+
+            echo "Rebuilding and restarting containers..."
+            docker compose up -d --build --remove-orphans
+
+            echo "Cleaning up unused images..."
+            docker image prune -f
+
+            echo "Waiting for app to come up..."
+            for i in $(seq 1 15); do
+              if curl -sf http://localhost:3002/ > /dev/null; then
+                echo "App is responding."
+                exit 0
+              fi
+              sleep 2
+            done
+
+            echo "ERROR: app did not respond after deploy"
+            docker compose logs app --tail 50
+            exit 1
