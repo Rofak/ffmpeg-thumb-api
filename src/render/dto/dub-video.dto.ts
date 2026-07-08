@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class DubSegmentDto {
   @ApiProperty({ description: 'Base64-encoded TTS audio for this segment' })
@@ -23,4 +23,11 @@ export class DubVideoDto {
 
   @ApiProperty({ type: [DubSegmentDto] })
   segments: DubSegmentDto[];
+
+  @ApiPropertyOptional({
+    example: 'https://example.com/background-music.mp3',
+    description:
+      'Optional background music/ambience track. When provided, dubbed segments are mixed on top of it instead of silence, so it survives in the final dub. Omit to keep the previous silence-bed behavior.',
+  })
+  accompanimentAudioUrl?: string;
 }

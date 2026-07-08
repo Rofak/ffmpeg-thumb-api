@@ -137,6 +137,7 @@ export class RenderController {
         userId,
         videoUrl: dto.originVideoUrl,
         segments,
+        accompanimentAudioUrl: dto.accompanimentAudioUrl,
       },
       { jobId },
     );

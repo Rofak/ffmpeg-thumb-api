@@ -3,6 +3,11 @@
 /node_modules
 /build
 
+# temp render/thumbnail working files - keep the dir itself (docker-compose
+# bind-mounts ./tmp), ignore everything written into it at runtime
+/tmp/*
+!/tmp/.gitkeep
+
 # Logs
 logs
 *.log

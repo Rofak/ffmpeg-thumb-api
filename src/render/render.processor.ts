@@ -11,6 +11,7 @@ export type RenderJobData =
       userId: string;
       videoUrl: string;
       segments: { audioPath: string; start: number; end: number }[];
+      accompanimentAudioUrl?: string;
     }
   | {
       type: 'extract-audio';
@@ -48,6 +49,7 @@ export class RenderProcessor extends WorkerHost {
         data.videoUrl,
         data.segments,
         onProgress,
+        data.accompanimentAudioUrl,
       );
     }
     if (data.type === 'extract-audio') {

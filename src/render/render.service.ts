@@ -271,6 +271,7 @@ export class RenderService {
     videoUrl: string,
     segments: { audioPath: string; start: number; end: number }[],
     onProgress?: (percent: number) => void,
+    accompanimentAudioUrl?: string,
   ) {
     const tmpDir = path.join(process.cwd(), 'tmp');
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
@@ -279,25 +280,47 @@ export class RenderService {
     const outputVideoPath = path.join(tmpDir, `dub_video_${randomUUID()}.mp4`);
     const outputAudioPath = path.join(tmpDir, `dub_audio_${randomUUID()}.m4a`);
     const thumbnailPath = path.join(tmpDir, `dub_thumb_${randomUUID()}.jpg`);
+    const accompanimentPath = accompanimentAudioUrl
+      ? path.join(tmpDir, `accompaniment_${randomUUID()}.mp3`)
+      : null;
     const cleanupPaths = [
       videoPath,
       outputVideoPath,
       outputAudioPath,
       thumbnailPath,
       ...segments.map((s) => s.audioPath),
+      ...(accompanimentPath ? [accompanimentPath] : []),
     ];
 
     try {
       await this.downloadToFile(videoUrl, videoPath);
+      if (accompanimentPath) {
+        await this.downloadToFile(accompanimentAudioUrl, accompanimentPath);
+      }
       onProgress?.(5);
 
       const videoDuration = await this.getDuration(videoPath);
 
-      const filterParts = [
-        'anullsrc=channel_layout=stereo:sample_rate=44100,apad[base]',
-      ];
-      const mixLabels = ['[base]'];
       const inputs: string[] = [];
+
+      // If an accompaniment track (e.g. the original background
+      // music/ambience) is provided, dubbed segments are mixed on top of it
+      // instead of over silence, so it survives in the final dub. Padded
+      // with `apad` the same way the silence bed is, so a track shorter
+      // than the video doesn't cut the mix short - the final `-t
+      // videoDuration` below bounds it either way.
+      let baseFilter =
+        'anullsrc=channel_layout=stereo:sample_rate=44100,apad[base]';
+      if (accompanimentPath) {
+        const accompanimentIdx = inputs.length + 1;
+        inputs.push(accompanimentPath);
+        // volume=0.5 so the background track sits under the dubbed voice
+        // segments instead of competing with them.
+        baseFilter = `[${accompanimentIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo,aresample=44100,volume=0.5,apad[base]`;
+      }
+
+      const filterParts = [baseFilter];
+      const mixLabels = ['[base]'];
 
       for (let i = 0; i < segments.length; i++) {
         const seg = segments[i];
