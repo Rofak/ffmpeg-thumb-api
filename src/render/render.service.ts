@@ -316,7 +316,7 @@ export class RenderService {
         inputs.push(accompanimentPath);
         // volume=0.5 so the background track sits under the dubbed voice
         // segments instead of competing with them.
-        baseFilter = `[${accompanimentIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo,aresample=44100,volume=0.5,apad[base]`;
+        baseFilter = `[${accompanimentIdx}:a]aformat=sample_rates=44100:channel_layouts=stereo,aresample=44100,volume=0.2,apad[base]`;
       }
 
       const filterParts = [baseFilter];
