@@ -26,6 +26,7 @@ import { RenderJobData } from './render.processor';
 import { RenderUrlDto } from './dto/render-url.dto';
 import { DubVideoDto } from './dto/dub-video.dto';
 import { ExtractAudioDto } from './dto/extract-audio.dto';
+import { CombineVideoDto } from './dto/combine-video.dto';
 import { getCpuCount, getRenderConcurrency } from './render-concurrency';
 import { randomUUID as uuidv4 } from 'crypto';
 
@@ -167,6 +168,33 @@ export class RenderController {
         userId,
         videoUrl: dto.videoUrl,
         bitrateKbps: dto.bitrateKbps,
+      },
+      { jobId },
+    );
+    return { jobId };
+  }
+
+  @Post('/combine/:userId')
+  @ApiOperation({
+    summary: 'Queue a job that concatenates video clip URLs into one video',
+  })
+  @ApiParam({ name: 'userId', description: 'Owner of the combined output' })
+  @ApiBody({ type: CombineVideoDto })
+  @ApiResponse({ status: 201, schema: { example: { jobId: 'uuid' } } })
+  async combineVideos(
+    @Param('userId') userId: string,
+    @Body() dto: CombineVideoDto,
+  ) {
+    if (!dto?.videoUrls || dto.videoUrls.length < 2) {
+      throw new BadRequestException('at least 2 videoUrls are required');
+    }
+    const jobId = uuidv4();
+    await this.renderQueue.add(
+      'render',
+      {
+        type: 'combine-video',
+        userId,
+        videoUrls: dto.videoUrls,
       },
       { jobId },
     );

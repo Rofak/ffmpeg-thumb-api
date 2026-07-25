@@ -445,6 +445,66 @@ export class RenderService {
     }
   }
 
+  async combineVideosFromUrls(
+    userId: string,
+    videoUrls: string[],
+    onProgress?: (percent: number) => void,
+  ) {
+    const tmpDir = path.join(process.cwd(), 'tmp');
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
+
+    const inputPaths = videoUrls.map(() =>
+      path.join(tmpDir, `clip_${randomUUID()}.mp4`),
+    );
+    const outputPath = path.join(tmpDir, `combined_${randomUUID()}.mp4`);
+    const cleanupPaths = [...inputPaths, outputPath];
+
+    try {
+      await Promise.all(
+        videoUrls.map((url, i) => this.downloadToFile(url, inputPaths[i])),
+      );
+      onProgress?.(5);
+
+      // Re-encoded via the concat filter (not the concat demuxer's stream
+      // copy) since clips coming from arbitrary URLs aren't guaranteed to
+      // share codec/resolution/timebase, which the demuxer requires.
+      const filterInputs = inputPaths
+        .map((_, i) => `[${i}:v:0][${i}:a:0]`)
+        .join('');
+      const args = ['-y'];
+      for (const inputPath of inputPaths) {
+        args.push('-i', inputPath);
+      }
+      args.push(
+        '-filter_complex',
+        `${filterInputs}concat=n=${inputPaths.length}:v=1:a=1[outv][outa]`,
+        '-map',
+        '[outv]',
+        '-map',
+        '[outa]',
+        '-c:v',
+        'libx264',
+        '-c:a',
+        'aac',
+        outputPath,
+      );
+
+      await this.runFFmpeg(
+        args,
+        onProgress &&
+          ((percent) => onProgress(10 + Math.round(percent * 0.85))),
+      );
+
+      const result = await this.uploadToS3(outputPath, userId);
+      onProgress?.(100);
+      return result;
+    } finally {
+      for (const p of cleanupPaths) {
+        if (fs.existsSync(p)) unlinkSync(p);
+      }
+    }
+  }
+
   async extractAudioFromUrl(
     userId: string,
     videoUrl: string,

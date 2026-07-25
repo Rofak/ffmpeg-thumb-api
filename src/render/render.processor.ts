@@ -18,7 +18,8 @@ export type RenderJobData =
       userId: string;
       videoUrl: string;
       bitrateKbps?: number;
-    };
+    }
+  | { type: 'combine-video'; userId: string; videoUrls: string[] };
 
 @Processor('render', {
   concurrency: getRenderConcurrency(),
@@ -57,6 +58,13 @@ export class RenderProcessor extends WorkerHost {
         data.userId,
         data.videoUrl,
         data.bitrateKbps,
+        onProgress,
+      );
+    }
+    if (data.type === 'combine-video') {
+      return this.renderService.combineVideosFromUrls(
+        data.userId,
+        data.videoUrls,
         onProgress,
       );
     }
