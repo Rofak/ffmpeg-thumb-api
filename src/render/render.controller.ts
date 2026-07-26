@@ -195,6 +195,7 @@ export class RenderController {
         type: 'combine-video',
         userId,
         videoUrls: dto.videoUrls,
+        webhookUrl: dto.webhookUrl,
       },
       { jobId },
     );

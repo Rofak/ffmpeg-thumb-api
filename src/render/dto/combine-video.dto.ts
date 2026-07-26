@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CombineVideoDto {
   @ApiProperty({
@@ -11,4 +11,11 @@ export class CombineVideoDto {
       'Video clip URLs, in the order they should be concatenated. At least 2 required.',
   })
   videoUrls: string[];
+
+  @ApiPropertyOptional({
+    example: 'https://example.com/webhook',
+    description:
+      'Optional URL POSTed with { jobId, status: "completed" | "failed", result?, error? } once the job settles.',
+  })
+  webhookUrl?: string;
 }

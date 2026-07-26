@@ -554,6 +554,14 @@ export class RenderService {
     }
   }
 
+  async notifyWebhook(url: string, payload: Record<string, unknown>) {
+    try {
+      await axios.post(url, payload, { timeout: 10_000 });
+    } catch {
+      // Best-effort: a failed/unreachable webhook must not fail the render job.
+    }
+  }
+
   async deleteRender(userId: string) {
     const prefix = `renders/${userId}/`;
     const listed: any = await this.s3Client.send(
