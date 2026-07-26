@@ -46,7 +46,7 @@ export class RenderProcessor extends WorkerHost {
       if (data.webhookUrl) {
         await this.renderService.notifyWebhook(data.webhookUrl, {
           jobId: job.id,
-          status: 'completed',
+          state: 'completed',
           result,
         });
       }
@@ -55,7 +55,7 @@ export class RenderProcessor extends WorkerHost {
       if (data.webhookUrl) {
         await this.renderService.notifyWebhook(data.webhookUrl, {
           jobId: job.id,
-          status: 'failed',
+          state: 'failed',
           error: err instanceof Error ? err.message : String(err),
         });
       }
