@@ -7,10 +7,12 @@ import { BullModule } from '@nestjs/bullmq';
 import { BullBoardModule } from '@bull-board/nestjs';
 import { ExpressAdapter } from '@bull-board/express';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
+import { HttpModule } from '@nestjs/axios';
 
 @Module({
   imports: [
     ConfigModule,
+    HttpModule,
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

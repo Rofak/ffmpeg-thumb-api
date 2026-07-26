@@ -18,6 +18,8 @@ import {
   createReadStream,
   statSync,
 } from 'fs';
+import { HttpService } from '@nestjs/axios';
+import { lastValueFrom } from 'rxjs';
 
 @Injectable()
 export class RenderService {
@@ -25,7 +27,10 @@ export class RenderService {
   private readonly bucketName: string;
   private readonly baseUrl: string;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private httpService: HttpService,
+  ) {
     this.bucketName = this.configService.get<string>('CONTABO_BUCKET_NAME_V2');
     this.baseUrl = `${this.configService.get<string>('CONTABO_BASE_URL_V2')}:${this.bucketName}`;
     this.s3Client = new S3Client({
@@ -556,7 +561,9 @@ export class RenderService {
 
   async notifyWebhook(url: string, payload: Record<string, unknown>) {
     try {
-      await axios.post(url, payload, { timeout: 10_000 });
+      await lastValueFrom(
+        this.httpService.post(url, payload, { timeout: 10_000 }),
+      );
     } catch {
       // Best-effort: a failed/unreachable webhook must not fail the render job.
     }
