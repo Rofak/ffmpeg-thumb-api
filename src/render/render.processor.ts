@@ -3,7 +3,7 @@ import { Job } from 'bullmq';
 import { RenderService } from './render.service';
 import { getRenderConcurrency } from './render-concurrency';
 
-export type RenderJobData =
+export type RenderJobData = (
   | { type: 'url'; userId: string; videoUrl: string; audioUrl: string }
   | { type: 'buffer'; userId: string; videoPath: string; audioPath: string }
   | {
@@ -19,7 +19,12 @@ export type RenderJobData =
       videoUrl: string;
       bitrateKbps?: number;
     }
-  | { type: 'combine-video'; userId: string; videoUrls: string[] };
+  | { type: 'combine-video'; userId: string; videoUrls: string[] }
+) & {
+  // Fired with { jobId, status: 'completed' | 'failed', result?, error? }
+  // once the job settles. Best-effort: a failed delivery does not fail the job.
+  webhookUrl?: string;
+};
 
 @Processor('render', {
   concurrency: getRenderConcurrency(),
@@ -36,6 +41,29 @@ export class RenderProcessor extends WorkerHost {
     };
 
     const data = job.data;
+    try {
+      const result = await this.runJob(data, onProgress);
+      if (data.webhookUrl) {
+        await this.renderService.notifyWebhook(data.webhookUrl, {
+          jobId: job.id,
+          state: 'completed',
+          result,
+        });
+      }
+      return result;
+    } catch (err) {
+      if (data.webhookUrl) {
+        await this.renderService.notifyWebhook(data.webhookUrl, {
+          jobId: job.id,
+          state: 'failed',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      throw err;
+    }
+  }
+
+  private runJob(data: RenderJobData, onProgress: (percent: number) => void) {
     if (data.type === 'url') {
       return this.renderService.renderFromUrls(
         data.userId,
