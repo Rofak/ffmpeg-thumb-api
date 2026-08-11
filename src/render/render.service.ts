@@ -175,6 +175,36 @@ export class RenderService {
     });
   }
 
+  private getVideoDimensions(
+    filePath: string,
+  ): Promise<{ width: number; height: number }> {
+    return new Promise((resolve, reject) => {
+      const ffprobe = spawn('ffprobe', [
+        '-v',
+        'error',
+        '-select_streams',
+        'v:0',
+        '-show_entries',
+        'stream=width,height',
+        '-of',
+        'csv=s=x:p=0',
+        filePath,
+      ]);
+      let stdout = '';
+      let stderr = '';
+      ffprobe.stdout.on('data', (chunk) => (stdout += chunk));
+      ffprobe.stderr.on('data', (chunk) => (stderr += chunk));
+      ffprobe.on('close', (code) => {
+        if (code === 0) {
+          const [width, height] = stdout.trim().split('x').map(Number);
+          resolve({ width, height });
+        } else {
+          reject(new Error(`ffprobe exited with code ${code}: ${stderr}`));
+        }
+      });
+    });
+  }
+
   private buildAtempoChain(tempo: number): string {
     if (tempo <= 0) {
       return 'atempo=1.0';
@@ -473,16 +503,37 @@ export class RenderService {
       // Re-encoded via the concat filter (not the concat demuxer's stream
       // copy) since clips coming from arbitrary URLs aren't guaranteed to
       // share codec/resolution/timebase, which the demuxer requires.
-      const filterInputs = inputPaths
-        .map((_, i) => `[${i}:v:0][${i}:a:0]`)
+      const dimensions = await Promise.all(
+        inputPaths.map((p) => this.getVideoDimensions(p)),
+      );
+      const targetWidth = Math.max(...dimensions.map((d) => d.width));
+      const targetHeight = Math.max(...dimensions.map((d) => d.height));
+
+      // The concat filter also requires every input to have identical
+      // frame size, so each clip is scaled to fit and letterboxed onto a
+      // common canvas (the largest dimensions among the clips) first.
+      // Audio is likewise normalized to a common sample rate/layout so
+      // mismatched source audio doesn't break the concat either.
+      const scaleParts = inputPaths.map(
+        (_, i) =>
+          `[${i}:v:0]scale=w=${targetWidth}:h=${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[v${i}]`,
+      );
+      const audioParts = inputPaths.map(
+        (_, i) =>
+          `[${i}:a:0]aformat=sample_rates=44100:channel_layouts=stereo,aresample=44100[a${i}]`,
+      );
+      const concatInputs = inputPaths
+        .map((_, i) => `[v${i}][a${i}]`)
         .join('');
+      const filterComplex = `${scaleParts.join(';')};${audioParts.join(';')};${concatInputs}concat=n=${inputPaths.length}:v=1:a=1[outv][outa]`;
+
       const args = ['-y'];
       for (const inputPath of inputPaths) {
         args.push('-i', inputPath);
       }
       args.push(
         '-filter_complex',
-        `${filterInputs}concat=n=${inputPaths.length}:v=1:a=1[outv][outa]`,
+        filterComplex,
         '-map',
         '[outv]',
         '-map',
