@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs-extra';
 import { spawn } from 'child_process';
 import axios from 'axios';
@@ -18,11 +18,14 @@ import {
   createReadStream,
   statSync,
 } from 'fs';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { HttpService } from '@nestjs/axios';
 import { lastValueFrom } from 'rxjs';
 
 @Injectable()
 export class RenderService {
+  private readonly logger = new Logger(RenderService.name);
   private s3Client: S3Client;
   private readonly bucketName: string;
   private readonly baseUrl: string;
@@ -117,15 +120,54 @@ export class RenderService {
     ];
   }
 
-  private async downloadToFile(url: string, destPath: string): Promise<void> {
-    const response = await axios.get(url, { responseType: 'stream' });
-    const writer = createWriteStream(destPath);
-    return new Promise((resolve, reject) => {
-      response.data.pipe(writer);
-      writer.on('finish', resolve);
-      writer.on('error', reject);
-      response.data.on('error', reject);
+  private async downloadToFile(
+    url: string,
+    destPath: string,
+    attempts = 3,
+  ): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        await this.downloadOnce(url, destPath);
+        return;
+      } catch (err) {
+        lastError = err;
+        // Strip the query string so signed-URL tokens don't end up in logs.
+        this.logger.warn(
+          `Download attempt ${attempt}/${attempts} failed for ${url.split('?')[0]}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        await fs.remove(destPath).catch(() => undefined);
+        if (attempt < attempts) {
+          await new Promise((r) => setTimeout(r, 2000 * attempt));
+        }
+      }
+    }
+    throw lastError;
+  }
+
+  private async downloadOnce(url: string, destPath: string): Promise<void> {
+    const idleMs = 60_000;
+    const response = await axios.get(url, {
+      responseType: 'stream',
+      timeout: 30_000,
     });
+    const source = response.data as Readable;
+    // Abort if no bytes arrive for idleMs, so a stalled connection can't hang the job.
+    let idle: NodeJS.Timeout;
+    const arm = () => {
+      clearTimeout(idle);
+      idle = setTimeout(
+        () => source.destroy(new Error(`download stalled: ${url}`)),
+        idleMs,
+      );
+    };
+    arm();
+    source.on('data', arm);
+    try {
+      await pipeline(source, createWriteStream(destPath));
+    } finally {
+      clearTimeout(idle);
+    }
   }
 
   private async uploadFileToS3(
