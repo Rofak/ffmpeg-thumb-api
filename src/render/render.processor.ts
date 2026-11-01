@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { RenderService } from './render.service';
@@ -31,6 +32,8 @@ export type RenderJobData = (
   lockDuration: 10 * 60 * 1000,
 })
 export class RenderProcessor extends WorkerHost {
+  private readonly logger = new Logger(RenderProcessor.name);
+
   constructor(private readonly renderService: RenderService) {
     super();
   }
@@ -52,6 +55,10 @@ export class RenderProcessor extends WorkerHost {
       }
       return result;
     } catch (err) {
+      this.logger.error(
+        `Job ${job.id} (${data.type}, user ${data.userId}) failed: ${err instanceof Error ? err.message : String(err)}`,
+        err instanceof Error ? err.stack : undefined,
+      );
       if (data.webhookUrl) {
         await this.renderService.notifyWebhook(data.webhookUrl, {
           jobId: job.id,

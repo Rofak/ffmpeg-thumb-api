@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs-extra';
 import { spawn } from 'child_process';
 import axios from 'axios';
@@ -25,6 +25,7 @@ import { lastValueFrom } from 'rxjs';
 
 @Injectable()
 export class RenderService {
+  private readonly logger = new Logger(RenderService.name);
   private s3Client: S3Client;
   private readonly bucketName: string;
   private readonly baseUrl: string;
@@ -131,6 +132,10 @@ export class RenderService {
         return;
       } catch (err) {
         lastError = err;
+        // Strip the query string so signed-URL tokens don't end up in logs.
+        this.logger.warn(
+          `Download attempt ${attempt}/${attempts} failed for ${url.split('?')[0]}: ${err instanceof Error ? err.message : String(err)}`,
+        );
         await fs.remove(destPath).catch(() => undefined);
         if (attempt < attempts) {
           await new Promise((r) => setTimeout(r, 2000 * attempt));
