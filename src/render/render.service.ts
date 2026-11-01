@@ -123,7 +123,7 @@ export class RenderService {
   private async downloadToFile(
     url: string,
     destPath: string,
-    attempts = 3,
+    attempts = 10,
   ): Promise<void> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -149,7 +149,7 @@ export class RenderService {
     const idleMs = 60_000;
     const response = await axios.get(url, {
       responseType: 'stream',
-      timeout: 30_000,
+      timeout: 5 * 60_000,
     });
     const source = response.data as Readable;
     // Abort if no bytes arrive for idleMs, so a stalled connection can't hang the job.
@@ -564,9 +564,7 @@ export class RenderService {
         (_, i) =>
           `[${i}:a:0]aformat=sample_rates=44100:channel_layouts=stereo,aresample=44100[a${i}]`,
       );
-      const concatInputs = inputPaths
-        .map((_, i) => `[v${i}][a${i}]`)
-        .join('');
+      const concatInputs = inputPaths.map((_, i) => `[v${i}][a${i}]`).join('');
       const filterComplex = `${scaleParts.join(';')};${audioParts.join(';')};${concatInputs}concat=n=${inputPaths.length}:v=1:a=1[outv][outa]`;
 
       const args = ['-y'];
