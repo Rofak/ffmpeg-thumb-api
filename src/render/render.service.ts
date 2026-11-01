@@ -18,6 +18,8 @@ import {
   createReadStream,
   statSync,
 } from 'fs';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { HttpService } from '@nestjs/axios';
 import { lastValueFrom } from 'rxjs';
 
@@ -117,15 +119,50 @@ export class RenderService {
     ];
   }
 
-  private async downloadToFile(url: string, destPath: string): Promise<void> {
-    const response = await axios.get(url, { responseType: 'stream' });
-    const writer = createWriteStream(destPath);
-    return new Promise((resolve, reject) => {
-      response.data.pipe(writer);
-      writer.on('finish', resolve);
-      writer.on('error', reject);
-      response.data.on('error', reject);
+  private async downloadToFile(
+    url: string,
+    destPath: string,
+    attempts = 3,
+  ): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        await this.downloadOnce(url, destPath);
+        return;
+      } catch (err) {
+        lastError = err;
+        await fs.remove(destPath).catch(() => undefined);
+        if (attempt < attempts) {
+          await new Promise((r) => setTimeout(r, 2000 * attempt));
+        }
+      }
+    }
+    throw lastError;
+  }
+
+  private async downloadOnce(url: string, destPath: string): Promise<void> {
+    const idleMs = 60_000;
+    const response = await axios.get(url, {
+      responseType: 'stream',
+      timeout: 30_000,
     });
+    const source = response.data as Readable;
+    // Abort if no bytes arrive for idleMs, so a stalled connection can't hang the job.
+    let idle: NodeJS.Timeout;
+    const arm = () => {
+      clearTimeout(idle);
+      idle = setTimeout(
+        () => source.destroy(new Error(`download stalled: ${url}`)),
+        idleMs,
+      );
+    };
+    arm();
+    source.on('data', arm);
+    try {
+      await pipeline(source, createWriteStream(destPath));
+    } finally {
+      clearTimeout(idle);
+    }
   }
 
   private async uploadFileToS3(
